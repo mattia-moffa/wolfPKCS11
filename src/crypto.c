@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
-
+#include "wolfssl/wolfcrypt/sha256.h"
 #ifdef HAVE_CONFIG_H
     #include <wolfpkcs11/config.h>
 #endif
@@ -6294,6 +6294,14 @@ CK_RV C_GenerateKey(CK_SESSION_HANDLE hSession,
         case CKM_GENERIC_SECRET_KEY_GEN:
             keyType = CKK_GENERIC_SECRET;
             break;
+#ifdef WOLFPKCS11_NSS
+        case CKM_NSS_PKCS12_PBE_SHA224_HMAC_KEY_GEN:
+        case CKM_NSS_PKCS12_PBE_SHA256_HMAC_KEY_GEN:
+        case CKM_NSS_PKCS12_PBE_SHA384_HMAC_KEY_GEN:
+        case CKM_NSS_PKCS12_PBE_SHA512_HMAC_KEY_GEN:
+            keyType = CKK_GENERIC_SECRET;
+            break;
+#endif
         default:
             rv = CKR_MECHANISM_INVALID;
             break;
@@ -6301,6 +6309,104 @@ CK_RV C_GenerateKey(CK_SESSION_HANDLE hSession,
 
     if (rv == CKR_OK) {
         CK_ATTRIBUTE *lenAttr = NULL;
+#ifdef WOLFPKCS11_NSS
+        /* NSS PKCS#12 PBE requires parameters, others don't */
+        if (pMechanism->mechanism == CKM_NSS_PKCS12_PBE_SHA224_HMAC_KEY_GEN ||
+            pMechanism->mechanism == CKM_NSS_PKCS12_PBE_SHA256_HMAC_KEY_GEN ||
+            pMechanism->mechanism == CKM_NSS_PKCS12_PBE_SHA384_HMAC_KEY_GEN ||
+            pMechanism->mechanism == CKM_NSS_PKCS12_PBE_SHA512_HMAC_KEY_GEN) {
+            CK_BYTE* derivedKey;
+            CK_ULONG derivedKeyLen;
+            WP11_Object* pbeKey;
+            unsigned char* secretKeyData[2] = { NULL, NULL };
+            CK_ULONG secretKeyLen[2] = { 0, 0 };
+            int ret;
+            int hashType;
+            CK_BYTE_PTR password = NULL;
+            CK_ULONG passwordLen = 0;
+            CK_BYTE_PTR salt = NULL;
+            CK_ULONG saltLen = 0;
+            CK_ULONG iterationCount = 0;
+            CK_PBE_PARAMS* params;
+
+            /* Determine hash type and key length based on mechanism */
+            switch (pMechanism->mechanism) {
+                case CKM_NSS_PKCS12_PBE_SHA224_HMAC_KEY_GEN:
+                    hashType = WC_SHA224;
+                    derivedKeyLen = WC_SHA224_DIGEST_SIZE;
+                    break;
+                case CKM_NSS_PKCS12_PBE_SHA256_HMAC_KEY_GEN:
+                    hashType = WC_SHA256;
+                    derivedKeyLen = WC_SHA256_DIGEST_SIZE;
+                    break;
+                case CKM_NSS_PKCS12_PBE_SHA384_HMAC_KEY_GEN:
+                    hashType = WC_SHA384;
+                    derivedKeyLen = WC_SHA384_DIGEST_SIZE;
+                    break;
+                case CKM_NSS_PKCS12_PBE_SHA512_HMAC_KEY_GEN:
+                    hashType = WC_SHA512;
+                    derivedKeyLen = WC_SHA512_DIGEST_SIZE;
+                    break;
+                default:
+                    return CKR_MECHANISM_INVALID;
+            }
+
+            if (pMechanism->pParameter == NULL ||
+                pMechanism->ulParameterLen != sizeof(CK_PBE_PARAMS)) {
+                return CKR_MECHANISM_PARAM_INVALID;
+            }
+            params = (CK_PBE_PARAMS*)pMechanism->pParameter;
+            password = params->pPassword;
+            passwordLen = params->ulPasswordLen;
+            salt = params->pSalt;
+            saltLen = params->ulSaltLen;
+            iterationCount = params->ulIteration;
+
+            if (salt == NULL || saltLen == 0 ||
+                iterationCount == 0) {
+                return CKR_MECHANISM_PARAM_INVALID;
+            }
+
+            derivedKey = (CK_BYTE*)XMALLOC(derivedKeyLen, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            if (derivedKey == NULL)
+                return CKR_HOST_MEMORY;
+
+            ret = WP11_PKCS12_PBKDF(derivedKey, password, passwordLen,
+                                  salt, saltLen, iterationCount,
+                                  derivedKeyLen, hashType);
+
+            if (ret != 0) {
+                XFREE(derivedKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+                return CKR_FUNCTION_FAILED;
+            }
+
+            /* Create the key object */
+            rv = NewObject(session, keyType, CKO_SECRET_KEY, pTemplate, ulCount, &pbeKey);
+            if (rv == CKR_OK) {
+                /* Set the derived key material */
+                secretKeyData[0] = (unsigned char*)&derivedKeyLen;
+                secretKeyLen[0] = sizeof(CK_ULONG);
+                secretKeyData[1] = derivedKey;
+                secretKeyLen[1] = derivedKeyLen;
+
+                ret = WP11_Object_SetSecretKey(pbeKey, secretKeyData, secretKeyLen);
+                if (ret == 0) {
+                    rv = AddObject(session, pbeKey, pTemplate, ulCount, phKey);
+                    if (rv != CKR_OK) {
+                        WP11_Object_Free(pbeKey);
+                    }
+                } else {
+                    WP11_Object_Free(pbeKey);
+                    rv = CKR_FUNCTION_FAILED;
+                }
+            }
+
+            XFREE(derivedKey, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            return rv;
+#endif
+        }
+
+        /* Standard key generation for non-PBE mechanisms */
         if (pMechanism->pParameter != NULL ||
                                           pMechanism->ulParameterLen != 0) {
             return CKR_MECHANISM_PARAM_INVALID;

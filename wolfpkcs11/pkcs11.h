@@ -327,6 +327,11 @@ extern "C" {
 #define CKM_NSS_TLS_PRF_GENERAL_SHA256            (CKM_NSS + 21)
 #define CKM_NSS_TLS_EXTENDED_MASTER_KEY_DERIVE    (CKM_NSS + 25)
 #define CKM_NSS_TLS_EXTENDED_MASTER_KEY_DERIVE_DH (CKM_NSS + 26)
+
+#define CKM_NSS_PKCS12_PBE_SHA224_HMAC_KEY_GEN    (CKM_NSS + 29)
+#define CKM_NSS_PKCS12_PBE_SHA256_HMAC_KEY_GEN    (CKM_NSS + 30)
+#define CKM_NSS_PKCS12_PBE_SHA384_HMAC_KEY_GEN    (CKM_NSS + 31)
+#define CKM_NSS_PKCS12_PBE_SHA512_HMAC_KEY_GEN    (CKM_NSS + 32)
 #endif
 
 #define CKR_OK                                0x00000000UL
@@ -722,8 +727,17 @@ typedef struct CK_NSS_TLS_EXTENDED_MASTER_KEY_DERIVE_PARAMS {
     CK_ULONG ulSessionHashLen;
     CK_VERSION_PTR pVersion;
 } CK_NSS_TLS_EXTENDED_MASTER_KEY_DERIVE_PARAMS;
-#endif
 
+typedef struct CK_PBE_PARAMS {
+    CK_BYTE_PTR pInitVector;
+    CK_UTF8CHAR_PTR pPassword;
+    CK_ULONG ulPasswordLen;
+    CK_BYTE_PTR pSalt;
+    CK_ULONG ulSaltLen;
+    CK_ULONG ulIteration;
+} CK_PBE_PARAMS;
+typedef CK_PBE_PARAMS* CK_PBE_PARAMS_PTR;
+#endif
 typedef struct CK_TLS_MAC_PARAMS {
     CK_MECHANISM_TYPE prfHashMechanism;
     CK_ULONG ulMacLength;
